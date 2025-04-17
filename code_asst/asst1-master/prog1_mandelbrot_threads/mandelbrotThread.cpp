@@ -15,12 +15,30 @@ typedef struct {
 } WorkerArgs;
 
 
-extern void mandelbrotSerial(
-    float x0, float y0, float x1, float y1,
-    int width, int height,
-    int startRow, int numRows,
-    int maxIterations,
-    int output[]);
+// extern void mandelbrotSerial(
+//     float x0, float y0, float x1, float y1,
+//     int width, int height,
+//     int startRow, int numRows,
+//     int maxIterations,
+//     int output[]);
+
+static inline int mandel(float c_re, float c_im, int count)
+{
+    float z_re = c_re, z_im = c_im;
+    int i;
+    for (i = 0; i < count; ++i) {
+
+        if (z_re * z_re + z_im * z_im > 4.f)
+            break;
+
+        float new_re = z_re*z_re - z_im*z_im;
+        float new_im = 2.f * z_re * z_im;
+        z_re = c_re + new_re;
+        z_im = c_im + new_im;
+    }
+
+    return i;
+}
 
 
 //
@@ -35,7 +53,49 @@ void workerThreadStart(WorkerArgs * const args) {
     // program that uses two threads, thread 0 could compute the top
     // half of the image and thread 1 could compute the bottom half.
 
-    printf("Hello world from thread %d\n", args->threadId);
+    double startTime = CycleTimer::currentSeconds();
+
+    // int startRow = (args->threadId * args->height) / args->numThreads;
+    // int numRows = args->threadId == args->numThreads - 1 ?
+    //     args->height - startRow : (args->height / args->numThreads);
+    // mandelbrotSerial(
+    //     args->x0, args->y0, args->x1, args->y1,
+    //     args->width, args->height,
+    //     startRow, numRows,
+    //     args->maxIterations,
+    //     args->output);
+
+    float dx = (args->x1 - args->x0) / args->width;
+    float dy = (args->y1 - args->y0) / args->height;
+
+    for (int j = args->threadId; j < args->height; j += args->numThreads) {
+        for (int i = 0; i < args->width; ++i) {
+            float x = args->x0 + i * dx;
+            float y = args->y0 + j * dy;
+
+            int index = (j * args->width + i);
+            args->output[index] = mandel(x, y, args->maxIterations);
+        }
+    }
+
+    if (args->threadId == args->numThreads - 1) {
+        int startRow = args->numThreads * (args->height / args->numThreads) + 1;
+        for (int j = startRow; j < args->height; j++) {
+            for (int i = 0; i < args->width; ++i) {
+                float x = args->x0 + i * dx;
+                float y = args->y0 + j * dy;
+
+                int index = (j * args->width + i);
+                args->output[index] = mandel(x, y, args->maxIterations);
+            }
+        }
+    }
+    
+    double endTime = CycleTimer::currentSeconds();
+    double elapsed = endTime - startTime;
+    printf("[mandelbrot thread %d]:\t\t[%.3f] ms\n", args->threadId, elapsed * 1000);
+    fflush(stdout);
+
 }
 
 //

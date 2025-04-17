@@ -181,24 +181,30 @@ void absVector(float* values, float* output, int N) {
   __cs149_vec_float x;
   __cs149_vec_float result;
   __cs149_vec_float zero = _cs149_vset_float(0.f);
-  __cs149_mask maskAll, maskIsNegative, maskIsNotNegative;
+  __cs149_mask maskIsNegative, maskIsNotNegative, maskValid;
 
 //  Note: Take a careful look at this loop indexing.  This example
 //  code is not guaranteed to work when (N % VECTOR_WIDTH) != 0.
 //  Why is that the case?
   for (int i=0; i<N; i+=VECTOR_WIDTH) {
 
-    // All ones
-    maskAll = _cs149_init_ones();
+    int k = N - i;
+
+    if (k < VECTOR_WIDTH) {
+      // Create a mask for the last iteration
+      maskValid = _cs149_init_ones(k);
+    } else {
+      maskValid = _cs149_init_ones();
+    }
 
     // All zeros
     maskIsNegative = _cs149_init_ones(0);
 
     // Load vector of values from contiguous memory addresses
-    _cs149_vload_float(x, values+i, maskAll);               // x = values[i];
+    _cs149_vload_float(x, values+i, maskValid);               // x = values[i];
 
     // Set mask according to predicate
-    _cs149_vlt_float(maskIsNegative, x, zero, maskAll);     // if (x < 0) {
+    _cs149_vlt_float(maskIsNegative, x, zero, maskValid);     // if (x < 0) {
 
     // Execute instruction using mask ("if" clause)
     _cs149_vsub_float(result, zero, x, maskIsNegative);      //   output[i] = -x;
@@ -210,7 +216,7 @@ void absVector(float* values, float* output, int N) {
     _cs149_vload_float(result, values+i, maskIsNotNegative); //   output[i] = x; }
 
     // Write results back to memory
-    _cs149_vstore_float(output+i, result, maskAll);
+    _cs149_vstore_float(output+i, result, maskValid);
   }
 }
 
@@ -249,7 +255,62 @@ void clampedExpVector(float* values, int* exponents, float* output, int N) {
   // Your solution should work for any value of
   // N and VECTOR_WIDTH, not just when VECTOR_WIDTH divides N
   //
-  
+
+  __cs149_vec_float x;
+  __cs149_vec_float result;
+  __cs149_vec_float maxClamp = _cs149_vset_float(9.999999f);
+
+  __cs149_vec_int y;
+  __cs149_vec_int exponentZero = _cs149_vset_int(0);
+  __cs149_vec_int exponentOne = _cs149_vset_int(1);
+
+  __cs149_mask maskValid, maskGreaterThanZero, maskClamp;
+
+  for (int i = 0; i < N; i += VECTOR_WIDTH) {
+    int k = N - i;
+
+    if (k < VECTOR_WIDTH) {
+      // Create a mask for the last iteration
+      maskValid = _cs149_init_ones(k);
+      maskGreaterThanZero = _cs149_init_ones(k);
+      maskClamp = _cs149_init_ones(k);
+    } else {
+      maskValid = _cs149_init_ones();
+    }
+
+
+    // Load vector of values from contiguous memory addresses
+    _cs149_vload_float(x, values + i, maskValid); // x = values[i];
+
+    // init result to 1
+    _cs149_vset_float(result, 1.f, maskValid); // result = 1.f;
+
+    // Load vector of exponents from contiguous memory addresses
+    _cs149_vload_int(y, exponents + i, maskValid); // y = exponents[i];
+
+    // Set mask according to y > 0
+    _cs149_vgt_int(maskGreaterThanZero, y, exponentZero, maskValid); // if (y > 0) 
+
+    while (_cs149_cntbits(maskGreaterThanZero) > 0) {
+      // Execute instruction using mask ("if" clause)
+      _cs149_vmult_float(result, result, x, maskGreaterThanZero); // result *= x;
+
+      // Decrement y
+      _cs149_vsub_int(y, y, exponentOne, maskGreaterThanZero); // y--;
+
+      // Set mask according to y > 0
+      _cs149_vgt_int(maskGreaterThanZero, y, exponentZero, maskValid); // if (y > 0) 
+    }
+
+    // Set mask according to result > 9.999999
+    _cs149_vgt_float(maskClamp, result, maxClamp, maskValid); // if (result > 9.999999)
+
+    // Set the result to 9.999999
+    _cs149_vmove_float(result, maxClamp, maskClamp); // result = 9.999999;
+
+    // Write results back to memory
+    _cs149_vstore_float(output + i, result, maskValid); // output[i] = result;
+  }
 }
 
 // returns the sum of all elements in values
@@ -270,11 +331,26 @@ float arraySumVector(float* values, int N) {
   //
   // CS149 STUDENTS TODO: Implement your vectorized version of arraySumSerial here
   //
-  
-  for (int i=0; i<N; i+=VECTOR_WIDTH) {
 
+  __cs149_vec_float x;
+  __cs149_vec_float sum = _cs149_vset_float(0.f);
+
+  __cs149_mask maskAll = _cs149_init_ones();
+
+  for (int i=0; i<N; i+=VECTOR_WIDTH) {
+    // Load vector of values from contiguous memory addresses
+    _cs149_vload_float(x, values+i, maskAll); // x = values[i];
+    // Add to sum
+    _cs149_vadd_float(sum, sum, x, maskAll); // sum += x;
   }
 
-  return 0.0;
+  // Store the result back to memory
+  float temp[VECTOR_WIDTH];
+  _cs149_vstore_float(temp, sum, maskAll); // output[i] = result;
+  float result = 0.f;
+  for (int i=0; i<VECTOR_WIDTH; i++) {
+    result += temp[i];
+  }
+  return result;
 }
 
