@@ -1,6 +1,12 @@
 #ifndef _TASKSYS_H
 #define _TASKSYS_H
 
+#include <atomic>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
+#include <shared_mutex>
+
 #include "itasksys.h"
 
 /*
@@ -34,6 +40,11 @@ class TaskSystemParallelSpawn: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+    private:
+        int num_threads_;
+        std::thread* threads_;
+
+        void threadFunc(IRunnable* runnable, int num_total_tasks, int* current_task_id, std::mutex* mutex);
 };
 
 /*
@@ -51,6 +62,24 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+    private:
+        struct BulkTask {
+            IRunnable* runnable;
+            int num_total_tasks;
+            std::atomic<int> current_task_id;
+            int num_completed_tasks;
+            std::mutex* mutex;
+            std::condition_variable* cv;
+        };
+        int num_threads_;
+        std::thread* threads_;
+        std::atomic<int> is_killed_;
+        std::atomic<int> is_ready_;
+        BulkTask* bulk_task_;
+        
+
+        void threadFunc();
+        
 };
 
 /*
@@ -68,6 +97,26 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+    private:
+        struct BulkTask {
+            IRunnable* runnable;
+            int num_total_tasks;
+            std::atomic<int> current_task_id;
+            std::atomic<int> num_completed_tasks;
+        };
+        int num_threads_;
+        std::thread* threads_;
+        std::atomic<int> is_killed_;
+        int is_ready_;
+        std::mutex is_ready_mutex_;
+        std::condition_variable is_ready_cv_;
+        int is_completed_;
+        std::mutex is_completed_mutex_;
+        std::condition_variable is_completed_cv_;
+        BulkTask* bulk_task_;
+        std::shared_mutex bulk_task_mutex_;
+
+        void threadFunc();
 };
 
 #endif
