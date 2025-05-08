@@ -7,6 +7,11 @@ struct Image;
 #define NUM_FIREWORKS 15
 #define NUM_SPARKS 20
 
+// blcok size constants
+#define BLOCK_DIM_X 16
+#define BLOCK_DIM_Y 16
+#define BLOCK_SIZE 256
+
 typedef enum {
     CIRCLE_RGB,
     CIRCLE_RGBY,

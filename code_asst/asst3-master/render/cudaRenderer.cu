@@ -14,6 +14,9 @@
 #include "sceneLoader.h"
 #include "util.h"
 
+#include "circleBoxTest.cu_inl"
+#include "exclusiveScan.cu_inl"
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // Putting all the cuda kernels here
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -427,6 +430,65 @@ __global__ void kernelRenderCircles() {
     }
 }
 
+__global__ void kernelRenderPixels() {
+
+    int id = threadIdx.y * blockDim.x + threadIdx.x;
+
+    int pixelX = blockIdx.x * blockDim.x + threadIdx.x;
+    int pixelY = blockIdx.y * blockDim.y + threadIdx.y;
+    int pixelIndex = pixelY * cuConstRendererParams.imageWidth + pixelX;
+
+    int boxL = blockDim.x * blockIdx.x;
+    int boxR = min(boxL + blockDim.x, cuConstRendererParams.imageWidth);
+    int boxB = blockDim.y * blockIdx.y;
+    int boxT = min(boxB + blockDim.y, cuConstRendererParams.imageHeight);
+
+    float boxLf = static_cast<float> (boxL) / cuConstRendererParams.imageWidth;
+    float boxRf = static_cast<float> (boxR) / cuConstRendererParams.imageWidth;
+    float boxBf = static_cast<float> (boxB) / cuConstRendererParams.imageHeight;
+    float boxTf = static_cast<float> (boxT) / cuConstRendererParams.imageHeight;
+
+    __shared__ uint intersectCircleIndicator[BLOCK_SIZE];
+    __shared__ uint prefixSum[BLOCK_SIZE];
+    __shared__ uint scratch[2 * BLOCK_SIZE];
+    __shared__ int intersectCircleIndex[BLOCK_SIZE];
+
+
+    for (int i = 0; i < cuConstRendererParams.numCircles; i += BLOCK_SIZE) {
+        int circleIndex = i + id;
+        if (circleIndex < cuConstRendererParams.numCircles) {
+            float px = cuConstRendererParams.position[circleIndex * 3];
+            float py = cuConstRendererParams.position[circleIndex * 3 + 1];
+            float rad = cuConstRendererParams.radius[circleIndex];
+            intersectCircleIndicator[id] = circleInBox(px, py, rad, boxLf, boxRf, boxTf, boxBf);
+        } else {
+            intersectCircleIndicator[id] = 0;
+        }
+        __syncthreads();
+        // prefix sum
+        sharedMemExclusiveScan(id, intersectCircleIndicator, prefixSum, scratch, BLOCK_SIZE);
+        __syncthreads();
+        if (intersectCircleIndicator[id] == 1) {
+            intersectCircleIndex[prefixSum[id]] = circleIndex;
+        }
+        __syncthreads();
+        int numIntersectCircles = prefixSum[BLOCK_SIZE - 1] + intersectCircleIndicator[BLOCK_SIZE - 1];
+        __syncthreads();
+        if (pixelX < boxR && pixelY < boxT) {
+            float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * pixelIndex]);
+            float2 pixelCenterNorm = make_float2((static_cast<float>(pixelX) + 0.5f) / cuConstRendererParams.imageWidth,
+                                                 (static_cast<float>(pixelY) + 0.5f) / cuConstRendererParams.imageHeight);
+            for (int j = 0; j < numIntersectCircles; j++) {
+                int circleIndex = intersectCircleIndex[j];
+                float3 p = *(float3*)(&cuConstRendererParams.position[circleIndex * 3]);
+                shadePixel(circleIndex, pixelCenterNorm, p, imgPtr);
+            }
+        }
+
+    }
+
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 
 
@@ -637,9 +699,11 @@ void
 CudaRenderer::render() {
 
     // 256 threads per block is a healthy number
-    dim3 blockDim(256, 1);
-    dim3 gridDim((numCircles + blockDim.x - 1) / blockDim.x);
+    dim3 blockDim(BLOCK_DIM_X, BLOCK_DIM_Y);
+    dim3 gridDim(
+        (image->width + blockDim.x - 1) / blockDim.x,
+        (image->height + blockDim.y - 1) / blockDim.y);
 
-    kernelRenderCircles<<<gridDim, blockDim>>>();
+    kernelRenderPixels<<<gridDim, blockDim>>>();
     cudaDeviceSynchronize();
 }
